@@ -27,6 +27,15 @@ const { splitInvoices } = require('../../split-invoices.js');
 
 const MAX_PER_BATCH = 20; // CTSI accepts at most 20 files per submit
 
+// Pace every Playwright action by this many ms. The TAI/CTSI sites are
+// client-rendered SPAs (Angular/PrimeNG + Kendo) whose controls settle a beat
+// AFTER networkidle; firing actions at full speed raced past the two-step login
+// and reached for "Show Advanced" before the invoice-search toolbar rendered
+// (login completed in ~2s, then a 30s timeout). The validated dry-run scripts
+// used slowMo (300-350ms) and worked end-to-end, so we match that here. It also
+// makes a visual run watchable.
+const SLOW_MO_MS = 300;
+
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
@@ -81,7 +90,7 @@ function resolveChromiumExecutable() {
  * returns undefined and Playwright resolves the browser itself as usual.
  */
 async function launchChromium(visualRun) {
-  const opts = { headless: !visualRun, acceptDownloads: true };
+  const opts = { headless: !visualRun, acceptDownloads: true, slowMo: SLOW_MO_MS };
   const executablePath = resolveChromiumExecutable();
   if (executablePath) opts.executablePath = executablePath;
   return await chromium.launch(opts);
