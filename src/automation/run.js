@@ -43,6 +43,51 @@ function chunk(arr, size) {
 }
 
 /**
+ * Resolve the full-Chromium chrome.exe under PLAYWRIGHT_BROWSERS_PATH, if that
+ * env var points at an on-disk browsers dir (set by main.js in the packaged
+ * app). Used only as a fallback if the normal launch can't find the browser.
+ * Returns undefined in dev (where Playwright resolves the browser itself).
+ */
+function resolveChromiumExecutable() {
+  const base = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (!base || base === '0') return undefined;
+  try {
+    const revs = fs
+      .readdirSync(base)
+      .filter((d) => d.startsWith('chromium-') && !d.includes('headless'))
+      .sort();
+    for (const rev of revs.reverse()) {
+      const exe = path.join(base, rev, 'chrome-win64', 'chrome.exe');
+      if (fs.existsSync(exe)) return exe;
+    }
+  } catch {
+    /* fall through to undefined */
+  }
+  return undefined;
+}
+
+/**
+ * Launch Chromium.
+ *
+ * In the PACKAGED app, main.js sets PLAYWRIGHT_BROWSERS_PATH to the unpacked
+ * .local-browsers dir, so resolveChromiumExecutable() finds the full-Chromium
+ * chrome.exe on disk. We launch that binary explicitly (via executablePath) for
+ * BOTH headed and headless runs — full Chromium runs headless fine, and this
+ * avoids depending on the separate chrome-headless-shell binary (one less
+ * moving part in the bundle, and it sidesteps the asar path-resolution bug that
+ * pointed launches inside app.asar → ENOENT).
+ *
+ * In DEV (PLAYWRIGHT_BROWSERS_PATH unset or '0'), resolveChromiumExecutable()
+ * returns undefined and Playwright resolves the browser itself as usual.
+ */
+async function launchChromium(visualRun) {
+  const opts = { headless: !visualRun, acceptDownloads: true };
+  const executablePath = resolveChromiumExecutable();
+  if (executablePath) opts.executablePath = executablePath;
+  return await chromium.launch(opts);
+}
+
+/**
  * Strip a payer dropdown label down to its core name for the TAI autocomplete.
  * Labels look like "CM - Binghamton (2031) c/o CTSI"; the autocomplete wants
  * just "CM - Binghamton" (drop everything from the first "(").
@@ -211,7 +256,7 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
     fs.rmSync(splitDir, { recursive: true, force: true });
     fs.mkdirSync(downloadDir, { recursive: true });
 
-    browser = await chromium.launch({ headless: !params.visualRun, acceptDownloads: true });
+    browser = await launchChromium(params.visualRun);
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
     page.setDefaultTimeout(30000);

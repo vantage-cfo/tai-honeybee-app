@@ -9,11 +9,20 @@
 // the packaged app resolves Chromium from the asarUnpack'd location. See
 // spec §7.2.
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
-if (app.isPackaged) {
-  process.env.PLAYWRIGHT_BROWSERS_PATH = '0';
-}
-
 const path = require('path');
+if (app.isPackaged) {
+  // Playwright's Chromium is asarUnpack'd to app.asar.unpacked on real disk.
+  // PLAYWRIGHT_BROWSERS_PATH='0' would resolve relative to the playwright-core
+  // package dir, which lands INSIDE app.asar (an archive — chrome.exe can't be
+  // spawned from there → ENOENT). Point it at the unpacked .local-browsers dir
+  // instead. Revision-agnostic: Playwright picks the right chromium-<rev> and
+  // headless-shell under this path.
+  process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(
+    process.resourcesPath,
+    'app.asar.unpacked',
+    'node_modules', 'playwright', 'node_modules', 'playwright-core', '.local-browsers'
+  );
+}
 const credentials = require('./credentials');
 const runner = require('./runner');
 const { PAYERS, ACCOUNTS } = require('../shared/payers');
