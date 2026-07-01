@@ -1,4 +1,4 @@
-# Boost Billing
+# TAI-Honeybee App
 
 A downloadable Windows desktop app that automates the Boost freight-billing workflow:
 pull a payer's invoices from **TAI**, split the merged PDF into one file per invoice, and
@@ -13,11 +13,11 @@ need **no Node.js or Playwright installed**.
 ## For end users
 
 ### Install
-1. Get the installer (`Boost Billing Setup <version>.exe`) from the `dist/` output of a build,
+1. Get the installer (`TAI-Honeybee App Setup <version>.exe`) from the `dist/` output of a build,
    or from wherever your team distributes it.
 2. Run it. Because the app isn't code-signed yet, Windows SmartScreen will say
    **"Windows protected your PC"** — click **More info → Run anyway**. This is expected.
-3. Launch **Boost Billing** from the Start menu / desktop shortcut.
+3. Launch **TAI-Honeybee App** from the Start menu / desktop shortcut.
 
 ### Use
 1. **Sign in** — enter your **TAI** and **CTSI / Honeybee** usernames and passwords. Leave
@@ -60,7 +60,7 @@ npm start                   # electron .
 ```bash
 npm run dist                # electron-builder --win -> unsigned NSIS installer in dist/
 ```
-Output: `dist/Boost Billing Setup <version>.exe` (~314 MB — it bundles Electron + Playwright's
+Output: `dist/TAI-Honeybee App Setup <version>.exe` (~314 MB — it bundles Electron + Playwright's
 Chromium). Build the installer with signing disabled so electron-builder doesn't try to sign
 the exe with a cert you don't have:
 ```bash

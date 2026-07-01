@@ -1,4 +1,8 @@
-# CLAUDE.md — tai-honeybee-app (Boost Billing desktop app)
+# CLAUDE.md — tai-honeybee-app (TAI-Honeybee App desktop app)
+
+> App display name is **TAI-Honeybee App** (electron-builder `productName`); it automates
+> the Boost Transport TAI→CTSI billing workflow. "Boost" elsewhere refers to the carrier /
+> workflow, not the app name.
 
 > Per-project context + conventions for this repo. Layered on top of the folder-level
 > `projects/CLAUDE.md`. Keep this current: when a convention, selector, or build step
@@ -100,13 +104,15 @@ the repo as the reference/source-of-truth and still runs via `npx playwright tes
   `winCodeSign` extraction fails on Windows with "Cannot create symbolic link" (macOS `darwin`
   symlinks need symlink privilege). Fix once via Windows Developer Mode, an admin terminal, or
   pre-extracting the cache skipping `darwin` — see README "Known Windows build gotcha". A working
-  `Boost Billing Setup 1.0.0.exe` (~314 MB) was built this way on 2026-07-01, with the bundled
+  `TAI-Honeybee App Setup 1.0.0.exe` (~314 MB) was built this way on 2026-07-01, with the bundled
   Chromium correctly unpacked under `app.asar.unpacked/.../.local-browsers/` (asarUnpack verified).
+  Installer is named `TAI-Honeybee App Setup <version>.exe`; installs to
+  `AppData\Local\Programs\TAI-Honeybee App` (per-user).
 - `npm test` — runs the original reference Playwright automation (needs `.env` + live creds).
 
 ## Not-yet-verified (needs manual check before production use)
 The build was assembled and statically verified (syntax, module load, IPC wiring, gotchas,
-payer data). `npm run dist` is now VERIFIED — it produced `Boost Billing Setup 1.0.0.exe`
+payer data). `npm run dist` is now VERIFIED — it produced `TAI-Honeybee App Setup 1.0.0.exe`
 (~314 MB) with Chromium correctly unpacked. The following still require a display / live
 credentials / a clean machine and were NOT verified in the build environment:
 - The packaged Chromium actually LAUNCHES on a clean Windows box with no Node/Playwright

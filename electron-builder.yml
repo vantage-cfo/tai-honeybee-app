@@ -1,5 +1,5 @@
-appId: com.vantage.boostbilling
-productName: Boost Billing
+appId: com.vantage.taihoneybeeapp
+productName: TAI-Honeybee App
 directories:
   output: dist
   buildResources: assets
