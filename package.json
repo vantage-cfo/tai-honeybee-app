@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Download merged Boost invoices from TAI, split by cover page, upload to CTSI",
+  "author": "Vantage CFO",
   "type": "commonjs",
   "main": "src/main/main.js",
   "scripts": {

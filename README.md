@@ -60,6 +60,32 @@ npm start                   # electron .
 ```bash
 npm run dist                # electron-builder --win -> unsigned NSIS installer in dist/
 ```
+Output: `dist/Boost Billing Setup <version>.exe` (~314 MB — it bundles Electron + Playwright's
+Chromium). Build the installer with signing disabled so electron-builder doesn't try to sign
+the exe with a cert you don't have:
+```bash
+CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist    # bash
+$env:CSC_IDENTITY_AUTO_DISCOVERY="false"; npm run dist   # PowerShell
+```
+
+**Known Windows build gotcha — `winCodeSign` symlink error.** On its first build, electron-builder
+downloads a `winCodeSign` bundle and extracts it with 7-Zip; it contains macOS (`darwin`) symlinks
+that Windows refuses to create without elevated privileges, so the build fails with
+`Cannot create symbolic link : A required privilege is not held by the client`. Fix it once, any of:
+- **Enable Windows Developer Mode** (Settings → Privacy & security → For developers), which lets
+  standard users create symlinks — then `npm run dist` works as-is; **or**
+- run the build once in an **Administrator** terminal; **or**
+- **pre-extract the cache skipping `darwin`** (no admin needed), then build normally:
+  ```bash
+  CACHE="$LOCALAPPDATA/electron-builder/Cache/winCodeSign"   # e.g. C:/Users/<you>/AppData/Local/...
+  mkdir -p "$CACHE"
+  curl -sL -o "$CACHE/winCodeSign-2.6.0.7z" \
+    https://github.com/electron-userland/electron-builder-binaries/releases/download/winCodeSign-2.6.0/winCodeSign-2.6.0.7z
+  node_modules/7zip-bin/win/x64/7za.exe x "$CACHE/winCodeSign-2.6.0.7z" \
+    "-o$CACHE/winCodeSign-2.6.0" -xr'!'darwin -y
+  ```
+  The `darwin` libs are macOS-only and unused by a Windows build. A successful `dist/` build was
+  produced this way on 2026-07-01.
 
 ### Run the original automation test (reference)
 The validated end-to-end automation lives in `playwright-script.spec.ts` and is the source of

@@ -95,15 +95,22 @@ the repo as the reference/source-of-truth and still runs via `npx playwright tes
 ## Commands
 - `npm install` — installs deps; `postinstall` runs `playwright install chromium` (project-local).
 - `npm start` — run the app in dev (`electron .`). Opens Login, or Main if creds are saved.
-- `npm run dist` — build the unsigned NSIS installer under `dist/` (Windows).
+- `npm run dist` — build the unsigned NSIS installer under `dist/` (Windows). Use
+  `CSC_IDENTITY_AUTO_DISCOVERY=false` to skip signing. **First-build gotcha:** electron-builder's
+  `winCodeSign` extraction fails on Windows with "Cannot create symbolic link" (macOS `darwin`
+  symlinks need symlink privilege). Fix once via Windows Developer Mode, an admin terminal, or
+  pre-extracting the cache skipping `darwin` — see README "Known Windows build gotcha". A working
+  `Boost Billing Setup 1.0.0.exe` (~314 MB) was built this way on 2026-07-01, with the bundled
+  Chromium correctly unpacked under `app.asar.unpacked/.../.local-browsers/` (asarUnpack verified).
 - `npm test` — runs the original reference Playwright automation (needs `.env` + live creds).
 
 ## Not-yet-verified (needs manual check before production use)
 The build was assembled and statically verified (syntax, module load, IPC wiring, gotchas,
-payer data), but the following require a display / live credentials / an actual build and were
-NOT verified in the build environment:
-- `npm run dist` produces a working installer, and the packaged Chromium launches on a clean
-  Windows box with no Node/Playwright.
+payer data). `npm run dist` is now VERIFIED — it produced `Boost Billing Setup 1.0.0.exe`
+(~314 MB) with Chromium correctly unpacked. The following still require a display / live
+credentials / a clean machine and were NOT verified in the build environment:
+- The packaged Chromium actually LAUNCHES on a clean Windows box with no Node/Playwright
+  (binary is present on disk and asarUnpack is confirmed, but runtime launch is unproven).
 - A real non-Binghamton payer direct-nav lands on the correct customer (the user-supplied
   customerIds are unverifiable statically — a wrong ID would silently pull the wrong customer).
 - The confirm gate actually blocks upload in a visual run; a real ≤20 batch produces a Batch ID.
