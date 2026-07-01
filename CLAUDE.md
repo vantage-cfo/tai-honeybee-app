@@ -95,6 +95,12 @@ the repo as the reference/source-of-truth and still runs via `npx playwright tes
   for the `Batch ID` text and capture it.
 - **Working dirs** (`downloads/`, `split-output/`) are written under `userData`, never inside
   the installed app dir (read-only under Program Files).
+- **Human-like pacing (anti-bot):** the browser launches with `slowMo` (`SLOW_MO_MS`, 300ms) so
+  every action is paced — the validated dry-run scripts used this and firing at full speed raced
+  past the two-step login and timed out on "Show Advanced". On top of that, ALL text inputs (TAI +
+  CTSI logins, payer search) go through `typeInto()` which types character-by-character
+  (`TYPE_DELAY_MS`) instead of `locator.fill()` (instant paste, which anti-bot systems flag). Do
+  not revert either to a plain fast `.fill()`.
 
 ## Commands
 - `npm install` — installs deps; `postinstall` runs `playwright install chromium` (project-local).

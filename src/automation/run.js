@@ -51,6 +51,23 @@ function chunk(arr, size) {
   return out;
 }
 
+// Per-keystroke delay (ms) for typing into text fields. slowMo paces the gaps
+// BETWEEN actions, but locator.fill() still pastes a value instantly — which
+// anti-bot systems flag. Typing character-by-character with this delay makes
+// credential/search entry look human. Applied to ALL text inputs.
+const TYPE_DELAY_MS = 90;
+
+/**
+ * Type into a field the way a person would: focus it, clear any autofill, then
+ * press keys one at a time with a delay. Use for EVERY text input instead of
+ * locator.fill() (which sets the whole value at once, with no keystrokes).
+ */
+async function typeInto(locator, text) {
+  await locator.click();
+  await locator.fill(''); // clear any pre-filled/autofilled value first
+  await locator.pressSequentially(text, { delay: TYPE_DELAY_MS });
+}
+
 /**
  * Resolve the full-Chromium chrome.exe under PLAYWRIGHT_BROWSERS_PATH, if that
  * env var points at an on-disk browsers dir (set by main.js in the packaged
@@ -172,8 +189,7 @@ async function selectPayerByName(page, taiPayerName, taiCustomerId, emit) {
     throw new Error(`Could not find payer "${core}" in TAI's payer search.`);
   }
 
-  await input.click();
-  await input.fill(core);
+  await typeInto(input, core);
 
   // Wait for the autocomplete option list to render.
   const option = page.getByRole('option').filter({ hasText: core }).first();
@@ -208,8 +224,8 @@ async function ctsiLogin(page, ctsiUser, ctsiPass, emit) {
         .then(() => true)
         .catch(() => false);
       if (showsLogin) {
-        await userInput.fill(ctsiUser);
-        await page.locator('input[name="password"]').fill(ctsiPass);
+        await typeInto(userInput, ctsiUser);
+        await typeInto(page.locator('input[name="password"]'), ctsiPass);
         await page.locator('button.auth0-lock-submit').click();
         await page.waitForURL(/portal\.ctsi-global\.com\/TMSV5/, { timeout: 30000 });
       }
@@ -276,9 +292,9 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
     emit({ type: 'stage', stage, status: 'start' });
     await page.goto('https://atl.taicloud.net/');
     await page.getByRole('link', { name: 'Other ways to sign in' }).click();
-    await page.getByRole('textbox', { name: 'Username' }).fill(params.taiUser);
+    await typeInto(page.getByRole('textbox', { name: 'Username' }), params.taiUser);
     await page.locator('#login-method-form-user-row').getByRole('button').click();
-    await page.getByRole('textbox', { name: 'Password' }).fill(params.taiPass);
+    await typeInto(page.getByRole('textbox', { name: 'Password' }), params.taiPass);
     await page.getByRole('button', { name: 'Log In' }).click();
     await page.waitForLoadState('networkidle');
     emit({ type: 'stage', stage, status: 'done' });
