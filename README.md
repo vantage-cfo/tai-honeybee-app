@@ -13,8 +13,9 @@ need **no Node.js or Playwright installed**.
 ## For end users
 
 ### Install
-1. Get the installer (`TAI-Honeybee App Setup <version>.exe`) from the `dist/` output of a build,
-   or from wherever your team distributes it.
+1. Download the latest installer (`TAI-Honeybee App Setup <version>.exe`) from the repo's
+   [**Releases** page](https://github.com/vantage-cfo/tai-honeybee-app/releases/latest)
+   (or build it yourself — see "For developers" below).
 2. Run it. Because the app isn't code-signed yet, Windows SmartScreen will say
    **"Windows protected your PC"** — click **More info → Run anyway**. This is expected.
 3. Launch **TAI-Honeybee App** from the Start menu / desktop shortcut.
