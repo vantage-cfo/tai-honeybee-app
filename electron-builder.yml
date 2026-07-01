@@ -1,0 +1,21 @@
+appId: com.vantage.boostbilling
+productName: Boost Billing
+directories:
+  output: dist
+  buildResources: assets
+files:
+  - src/**
+  - split-invoices.js
+  - package.json
+asarUnpack:
+  - node_modules/playwright/**
+  - node_modules/playwright-core/**
+win:
+  target: nsis
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true

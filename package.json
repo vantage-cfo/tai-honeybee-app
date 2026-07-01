@@ -1,0 +1,25 @@
+{
+  "name": "boost-tai-ctsi-automation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Download merged Boost invoices from TAI, split by cover page, upload to CTSI",
+  "type": "commonjs",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "postinstall": "playwright install chromium",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.1.200",
+    "playwright": "^1.61.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "dotenv": "^17.4.2",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

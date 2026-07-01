@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <title>Boost Billing</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-name">Boost Billing</span>
+      <span class="brand-sub">TAI → CTSI invoice automation</span>
+    </div>
+    <button class="btn btn-ghost" id="signout-btn" type="button">Sign out</button>
+  </header>
+
+  <div class="main-page">
+    <div class="main-content">
+
+      <div id="result-banner" class="banner">
+        <span id="result-banner-text"></span>
+        <button class="banner-dismiss" id="result-banner-dismiss" type="button" aria-label="Dismiss">&times;</button>
+      </div>
+
+      <!-- Run form -->
+      <section class="card" id="run-form-card">
+        <h1 style="font-size:16px;margin:0 0 4px;">New run</h1>
+        <p class="subtitle" style="margin-bottom:20px;">Pull invoices from TAI, split them, and upload to CTSI.</p>
+
+        <form id="run-form" novalidate>
+          <div class="field" id="field-payer">
+            <label for="payer">Payer</label>
+            <select id="payer" name="payer"></select>
+          </div>
+
+          <div class="field" id="field-account">
+            <label for="account">Client (CTSI account)</label>
+            <select id="account" name="account"></select>
+          </div>
+
+          <div class="field">
+            <label>Invoice date range</label>
+            <div class="date-range-row">
+              <div class="field" id="field-startDate" style="margin-bottom:0;">
+                <label for="startDate">Start</label>
+                <input type="date" id="startDate" name="startDate" />
+                <div class="field-error-text">Start date is required.</div>
+              </div>
+              <div class="field" id="field-endDate" style="margin-bottom:0;">
+                <label for="endDate">End</label>
+                <input type="date" id="endDate" name="endDate" />
+                <div class="field-error-text">End must be on or after Start.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="checkbox-row">
+            <input type="checkbox" id="visualRun" />
+            <label for="visualRun">Watch it run (opens a browser window)</label>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-block" id="run-btn">Run</button>
+        </form>
+      </section>
+
+      <!-- Progress panel -->
+      <section id="progress-section" class="hidden" style="display:flex;flex-direction:column;gap:20px;">
+
+        <section class="card">
+          <h2 class="panel-title">Progress</h2>
+          <div class="stage-tracker" id="stage-tracker"></div>
+          <div class="btn-row mt-16">
+            <button class="btn btn-danger" id="cancel-run-btn" type="button">Cancel run</button>
+          </div>
+        </section>
+
+        <section class="card hidden" id="split-panel">
+          <h2 class="panel-title">Split invoices</h2>
+          <div class="file-list" id="split-file-list"></div>
+          <button class="btn btn-secondary" id="review-files-btn" type="button">Review files</button>
+        </section>
+
+        <section class="card confirm-panel hidden" id="confirm-panel">
+          <h2 class="panel-title">Confirm before upload</h2>
+          <p id="confirm-panel-text"></p>
+          <div class="btn-row">
+            <button class="btn btn-secondary" id="confirm-open-folder-btn" type="button">Open folder</button>
+            <button class="btn btn-danger" id="confirm-cancel-btn" type="button">Cancel run</button>
+            <button class="btn btn-primary" id="confirm-upload-btn" type="button">Confirm &amp; upload</button>
+          </div>
+        </section>
+
+        <section class="card hidden" id="batch-panel">
+          <h2 class="panel-title">Batch upload</h2>
+          <div class="batch-list" id="batch-list"></div>
+        </section>
+
+        <section class="card">
+          <div class="log-header">
+            <h2 class="panel-title" style="margin:0;">Run log</h2>
+            <button class="btn btn-secondary" id="copy-log-btn" type="button">Copy log</button>
+          </div>
+          <textarea class="run-log" id="run-log" readonly></textarea>
+        </section>
+
+      </section>
+
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

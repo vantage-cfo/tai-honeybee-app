@@ -1,0 +1,13 @@
+node_modules/
+.env
+downloads/
+split-output/
+recordings/*.spec.ts
+test-results/
+playwright-report/
+dist/
+# local dry-run / inspection testers (contain no secrets, read from .env)
+dry-run.js
+dry-run-full.js
+ctsi-login-test.js
+scratch-*.png

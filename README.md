@@ -1,0 +1,104 @@
+# Boost Billing
+
+A downloadable Windows desktop app that automates the Boost freight-billing workflow:
+pull a payer's invoices from **TAI**, split the merged PDF into one file per invoice, and
+upload them in batches to **CTSI / Honeybee TMS** — with a review-and-confirm step before
+anything is submitted.
+
+Built with Electron; it bundles the browser automation and a Chromium browser, so end users
+need **no Node.js or Playwright installed**.
+
+---
+
+## For end users
+
+### Install
+1. Get the installer (`Boost Billing Setup <version>.exe`) from the `dist/` output of a build,
+   or from wherever your team distributes it.
+2. Run it. Because the app isn't code-signed yet, Windows SmartScreen will say
+   **"Windows protected your PC"** — click **More info → Run anyway**. This is expected.
+3. Launch **Boost Billing** from the Start menu / desktop shortcut.
+
+### Use
+1. **Sign in** — enter your **TAI** and **CTSI / Honeybee** usernames and passwords. Leave
+   **"Save login details on this computer"** checked to skip this screen next time (credentials
+   are stored encrypted via the Windows credential system — never in plain text). Uncheck it to
+   keep them for this session only.
+2. **Set up a run** on the main screen:
+   - **Payer** — the TAI customer to pull invoices for.
+   - **Client** — the CTSI account to upload under.
+   - **Invoice date range** — Start and End dates.
+   - **Watch it run** — check this to open a visible browser window and watch the automation;
+     leave unchecked to run in the background.
+3. Click **Run**. The app logs in, downloads the invoices, and splits them.
+4. **Review before upload** — when splitting finishes, the app shows how many invoices were
+   found and pauses. Click **Open folder** to inspect the split PDFs, then either **Confirm &
+   upload** to send them to CTSI, or **Cancel run** to stop. **Nothing is uploaded until you
+   confirm.**
+5. Watch the stage tracker and batch progress; each batch's **Batch ID** is shown on success.
+   Use **Copy log** to copy the full run log if you need to share it.
+
+---
+
+## For developers
+
+### Prerequisites
+- Node.js 20+ (the app is built/run with Node 24 locally).
+- Windows for building the Windows installer.
+
+### Setup
+```bash
+npm install                 # also runs `playwright install chromium` (project-local)
+```
+
+### Run in dev
+```bash
+npm start                   # electron .
+```
+
+### Build the Windows installer
+```bash
+npm run dist                # electron-builder --win -> unsigned NSIS installer in dist/
+```
+
+### Run the original automation test (reference)
+The validated end-to-end automation lives in `playwright-script.spec.ts` and is the source of
+truth the app's automation module was ported from. It needs a `.env` (see `.env.example`) with
+real credentials.
+```bash
+npm test                    # playwright test
+HEADLESS=1 npm test         # headless
+```
+
+### Project layout
+```
+src/
+  main/         Electron main process: window, IPC, credentials, run bridge
+  preload/      contextBridge API exposed to the renderer as window.boost
+  automation/   run.js — the automation module (ported from playwright-script.spec.ts)
+  renderer/     login + main screens (no-build HTML/CSS/vanilla JS)
+  shared/       payers.js — payer/account options + payer->customerId map
+split-invoices.js           PDF splitter (reused as-is by the automation)
+playwright-script.spec.ts   reference automation (still runs via `npm test`)
+electron-builder.yml        NSIS installer config
+.npmrc                      PLAYWRIGHT_BROWSERS_PATH=0 (project-local Chromium)
+```
+
+See [`CLAUDE.md`](./CLAUDE.md) for architecture, key decisions, and the hard-won
+automation gotchas that must not be regressed.
+
+### Security
+- Credentials are encrypted with Electron `safeStorage` (Windows DPAPI) at
+  `userData/creds.enc`; unsaved sessions are held only in the main process's memory. Passwords
+  are never written in plain text or logged.
+- `contextIsolation` is on and `nodeIntegration` is off; the renderer's only access to
+  Node/Electron is the narrow `window.boost` preload API.
+- `.env` (used only by the reference test) is git-ignored — never commit real credentials.
+
+### Status / caveats
+This build has been statically verified (syntax, module wiring, IPC contract, automation
+selectors, payer data). The following still require manual verification on a real machine with
+live credentials before production use: the packaged installer + Chromium launch on a clean
+Windows box, a real non-Binghamton payer landing on the correct customer, the live confirm-gate
+and a real batch producing a Batch ID, and the credential save/session round-trip through the UI.
+The installer is currently **unsigned**.

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <title>Boost Billing — Sign in</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-name">Boost Billing</span>
+      <span class="brand-sub">TAI → CTSI invoice automation</span>
+    </div>
+  </header>
+
+  <div class="centered-page">
+    <div class="card card-login">
+      <h1>Sign in</h1>
+      <p class="subtitle">Enter your TAI and CTSI logins to continue.</p>
+
+      <div id="error-banner" class="banner banner-error">
+        <span id="error-banner-text"></span>
+        <button class="banner-dismiss" id="error-banner-dismiss" type="button" aria-label="Dismiss">&times;</button>
+      </div>
+
+      <form id="login-form" novalidate>
+        <div class="section-label">TAI (atl.taicloud.net)</div>
+
+        <div class="field" id="field-taiUser">
+          <label for="taiUser">TAI Username</label>
+          <input type="text" id="taiUser" name="taiUser" autocomplete="username" />
+          <div class="field-error-text">TAI Username is required.</div>
+        </div>
+
+        <div class="field" id="field-taiPass">
+          <label for="taiPass">TAI Password</label>
+          <div class="password-row">
+            <input type="password" id="taiPass" name="taiPass" autocomplete="current-password" />
+            <button type="button" class="toggle-visibility" data-target="taiPass">Show</button>
+          </div>
+          <div class="field-error-text">TAI Password is required.</div>
+        </div>
+
+        <div class="section-label">CTSI / Honeybee (portal.ctsi-global.com)</div>
+
+        <div class="field" id="field-ctsiUser">
+          <label for="ctsiUser">CTSI Username</label>
+          <input type="text" id="ctsiUser" name="ctsiUser" autocomplete="username" />
+          <div class="field-error-text">CTSI Username is required.</div>
+        </div>
+
+        <div class="field" id="field-ctsiPass">
+          <label for="ctsiPass">CTSI Password</label>
+          <div class="password-row">
+            <input type="password" id="ctsiPass" name="ctsiPass" autocomplete="current-password" />
+            <button type="button" class="toggle-visibility" data-target="ctsiPass">Show</button>
+          </div>
+          <div class="field-error-text">CTSI Password is required.</div>
+        </div>
+
+        <div class="checkbox-row">
+          <input type="checkbox" id="saveCreds" checked />
+          <label for="saveCreds">Save login details on this computer</label>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="continue-btn">
+          <span id="continue-btn-text">Continue</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script src="login.js"></script>
+</body>
+</html>
