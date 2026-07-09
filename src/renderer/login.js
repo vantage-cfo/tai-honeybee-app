@@ -56,17 +56,9 @@
     }
   }
 
-  async function init() {
-    try {
-      const hasCreds = await window.boost.hasCreds();
-      if (hasCreds) {
-        window.boost.navigate('main');
-        return;
-      }
-    } catch {
-      // fall through to showing the login screen
-    }
-  }
+  // Note: no creds-based auto-skip here. main.js#createWindow already loads
+  // main.html directly when hasCreds() is true, so login.html is only ever
+  // shown when there are no persisted creds (LOW-11).
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -111,6 +103,4 @@
       showError(err && err.message ? err.message : 'Could not save login details.');
     }
   });
-
-  init();
 })();

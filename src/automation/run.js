@@ -171,21 +171,16 @@ async function applyInvoiceDateRange(scope, startIso, endIso) {
 
 /**
  * Select the payer by name via the TAI autocomplete (#selectedOrganization).
- * See spec §4.4. Defensive: a missing input is only fatal when there is no
- * customerId fallback (i.e. direct-nav by ID did not happen).
+ * See spec §4.4. This FAILSAFE path is invoked ONLY when a payer has no known
+ * customerId (see the guarded call site), so there is no customerId fallback
+ * here — a missing input or no match is always fatal.
  */
-async function selectPayerByName(page, taiPayerName, taiCustomerId, emit) {
+async function selectPayerByName(page, taiPayerName) {
   const core = coreName(taiPayerName);
   const input = page.locator('#selectedOrganization');
   const visible = await input.isVisible().catch(() => false);
 
   if (!visible) {
-    if (taiCustomerId) {
-      // Fast path already navigated by ID; autocomplete just isn't present
-      // on this view. Non-fatal.
-      emit({ type: 'log', level: 'info', message: 'Payer autocomplete not present; continuing with direct customerId navigation.' });
-      return;
-    }
     throw new Error(`Could not find payer "${core}" in TAI's payer search.`);
   }
 
@@ -199,10 +194,6 @@ async function selectPayerByName(page, taiPayerName, taiCustomerId, emit) {
     .catch(() => false);
 
   if (!found) {
-    if (taiCustomerId) {
-      emit({ type: 'log', level: 'warn', message: `Payer autocomplete found no match for "${core}"; continuing with direct customerId navigation.` });
-      return;
-    }
     throw new Error(`Could not find payer "${core}" in TAI's payer search.`);
   }
 
@@ -276,6 +267,17 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
   let browser = null;
   let stage = null;
 
+  // Poll cancellation at stage boundaries (MED-5). We never force-close the
+  // browser mid-action — we let the current action finish, then bail cleanly
+  // and let the finally-block close the browser. Returns true if we bailed.
+  const bailIfCancelled = () => {
+    if (isCancelled()) {
+      emit({ type: 'cancelled' });
+      return true;
+    }
+    return false;
+  };
+
   try {
     // Fresh output dirs so we never re-upload stale split PDFs.
     fs.rmSync(splitDir, { recursive: true, force: true });
@@ -298,6 +300,12 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
     await page.getByRole('button', { name: 'Log In' }).click();
     await page.waitForLoadState('networkidle');
     emit({ type: 'stage', stage, status: 'done' });
+    if (bailIfCancelled()) return { batchIds: [] };
+
+    // Steps 2-3 (invoice search + date-range filter) run under this stage so an
+    // error there reports 'invoice-search', not a stale 'tai-login' (LOW-13).
+    // The renderer no-ops unknown stage keys in its tracker.
+    stage = 'invoice-search';
 
     // ── STEP 2: open the selected customer's invoices (direct-nav) ───────
     // Instead of clicking the fragile balance link (which changes daily), we
@@ -322,12 +330,13 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
     // is invoked ONLY when a payer has no known customerId (taiCustomerId is
     // null) — e.g. a future payer added to the dropdown without an ID yet.
     if (!params.taiCustomerId) {
-      await selectPayerByName(page, params.taiPayerName, params.taiCustomerId, emit);
+      await selectPayerByName(page, params.taiPayerName);
     }
 
     // ── STEP 3: apply the Invoice Date range filter (app-configured) ─────
     // Show Advanced → pick start/end in the PrimeNG range picker → Search.
     await applyInvoiceDateRange(page, params.startDate, params.endDate);
+    if (bailIfCancelled()) return { batchIds: [] };
 
     // ── STEP 4: select all invoices and download the merged PDF ──────────
     stage = 'download';
@@ -377,6 +386,7 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
     }
     emit({ type: 'log', level: 'info', message: `Downloaded merged PDF -> ${mergedPath}` });
     emit({ type: 'stage', stage, status: 'done' });
+    if (bailIfCancelled()) return { batchIds: [] };
 
     // ── STEP 5: split the merged PDF by Boost cover page ──────────────────
     stage = 'split';
@@ -388,6 +398,7 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
     emit({ type: 'log', level: 'info', message: `Split into ${splitFiles.length} invoice PDF(s).` });
     emit({ type: 'split', files: splitFiles });
     emit({ type: 'stage', stage, status: 'done' });
+    if (bailIfCancelled()) return { batchIds: [] };
 
     // ── CONFIRM GATE (NEW, §4.5) ──────────────────────────────────────────
     const batchCount = Math.ceil(splitFiles.length / MAX_PER_BATCH);

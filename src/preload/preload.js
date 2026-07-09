@@ -9,8 +9,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('boost', {
-  // Credentials
-  loadCreds: () => ipcRenderer.invoke('creds:load'),
+  // Credentials — plaintext values never cross this boundary (MED-2).
+  // hasEffectiveCreds returns only a boolean: whether a run can proceed.
+  hasEffectiveCreds: () => ipcRenderer.invoke('creds:hasEffective'),
   saveCreds: (creds) => ipcRenderer.invoke('creds:save', creds),
   clearCreds: () => ipcRenderer.invoke('creds:clear'),
   hasCreds: () => ipcRenderer.invoke('creds:has'),

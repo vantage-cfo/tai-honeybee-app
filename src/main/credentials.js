@@ -28,6 +28,9 @@ function isValidCreds(obj) {
  * @param {{taiUser:string, taiPass:string, ctsiUser:string, ctsiPass:string}} creds
  */
 function saveCreds(creds) {
+  if (!isValidCreds(creds)) {
+    throw new Error('Invalid login details; all fields (TAI + CTSI username and password) are required.');
+  }
   if (!safeStorage.isEncryptionAvailable()) {
     throw new Error('Secure storage unavailable on this machine; login details cannot be saved.');
   }

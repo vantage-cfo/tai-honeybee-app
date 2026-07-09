@@ -10,7 +10,8 @@
     "start": "electron .",
     "dist": "electron-builder --win",
     "postinstall": "playwright install chromium",
-    "test": "playwright test"
+    "test": "echo \"'npm test' is disabled: the Playwright suite runs a LIVE end-to-end workflow that logs into TAI/CTSI with real credentials and performs REAL production invoice uploads to CTSI. Run 'npm run test:e2e-live' only if you truly intend to hit production.\"",
+    "test:e2e-live": "playwright test"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",
