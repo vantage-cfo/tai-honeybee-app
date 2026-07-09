@@ -161,17 +161,20 @@
   // ── Run lifecycle ─────────────────────────────────────────────────────
   function setRunning(running) {
     runBtn.disabled = running;
+    // Disable Sign out mid-run (MED-6): signing out clears creds and strands
+    // the active run, blocking new runs until an app restart.
+    signoutBtn.disabled = running;
     cancelRunBtn.style.display = running ? '' : 'none';
   }
 
-  async function getCreds() {
-    // loadCreds returns the effective creds from the main process: the
-    // in-memory session set (unsaved run) if present, else the persisted set.
-    const creds = await window.boost.loadCreds();
-    if (!creds) {
+  async function ensureCreds() {
+    // The main process owns the plaintext creds (MED-2). We only ask whether a
+    // run can proceed; the actual values are merged into the run params in the
+    // main process. Preserves the "No saved login details" error path.
+    const hasCreds = await window.boost.hasEffectiveCreds();
+    if (!hasCreds) {
       throw new Error('No saved login details found. Please sign in again.');
     }
-    return creds;
   }
 
   runForm.addEventListener('submit', async (e) => {
@@ -179,9 +182,8 @@
     hideBanner();
     if (!validateForm()) return;
 
-    let creds;
     try {
-      creds = await getCreds();
+      await ensureCreds();
     } catch (err) {
       showBanner('error', err.message);
       return;
@@ -191,10 +193,6 @@
     const account = accounts[Number(accountSelect.value)];
 
     const params = {
-      taiUser: creds.taiUser,
-      taiPass: creds.taiPass,
-      ctsiUser: creds.ctsiUser,
-      ctsiPass: creds.ctsiPass,
       taiPayerName: payer.label,
       taiCustomerId: payer.customerId,
       startDate: startDateInput.value,

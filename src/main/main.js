@@ -41,7 +41,7 @@ function createWindow() {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -66,10 +66,12 @@ app.on('window-all-closed', () => {
 });
 
 // ── IPC: credentials ─────────────────────────────────────────────────────
-// creds:load returns the EFFECTIVE creds (in-memory session set first, else
-// the persisted encrypted set) so the unsaved-session path works across the
-// login->main navigation. creds:has stays file-backed (drives login auto-skip).
-ipcMain.handle('creds:load', () => credentials.getEffectiveCreds());
+// Plaintext credentials NEVER cross the IPC boundary into the renderer (MED-2).
+// creds:hasEffective reports only WHETHER a run can proceed — i.e. whether an
+// in-memory session set or the persisted encrypted set exists. The actual
+// credential values are merged into the run params inside the main process
+// (runner.startRun). creds:has stays file-backed (drives login auto-skip).
+ipcMain.handle('creds:hasEffective', () => credentials.getEffectiveCreds() != null);
 ipcMain.handle('creds:save', (_event, creds) => credentials.saveCreds(creds));
 ipcMain.handle('creds:clear', () => credentials.clearCreds());
 ipcMain.handle('creds:has', () => credentials.hasCreds());
@@ -80,9 +82,8 @@ ipcMain.handle('options:get', () => ({ payers: PAYERS, accounts: ACCOUNTS }));
 
 // ── IPC: run control ─────────────────────────────────────────────────────
 ipcMain.handle('run:start', async (event, params) => {
-  if (runner.isRunActive()) {
-    throw new Error('A run is already in progress.');
-  }
+  // Single-run guard lives in runner.startRun (kept there as the single source
+  // of truth); no duplicate check here.
   await runner.startRun(params, event.sender);
 });
 
@@ -95,8 +96,21 @@ ipcMain.handle('run:cancel', () => {
 });
 
 // ── IPC: shell ───────────────────────────────────────────────────────────
+// Only ever open a folder INSIDE our own userData tree (MED-4). A renderer-
+// supplied path is resolved and validated to be under userData; anything else
+// (or a missing path) falls back to the split-output dir. Never shell.openPath
+// an arbitrary renderer-supplied path — that could launch executables.
 ipcMain.handle('shell:openFolder', async (_event, absPath) => {
-  await shell.openPath(absPath);
+  const userData = path.resolve(app.getPath('userData'));
+  const splitDir = path.join(userData, 'split-output');
+  let target = splitDir;
+  if (typeof absPath === 'string' && absPath.length > 0) {
+    const resolved = path.resolve(absPath);
+    if (resolved === userData || resolved.startsWith(userData + path.sep)) {
+      target = resolved;
+    }
+  }
+  await shell.openPath(target);
 });
 
 // ── IPC: navigation ──────────────────────────────────────────────────────

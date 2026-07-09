@@ -9,6 +9,7 @@
 const path = require('path');
 const { app } = require('electron');
 const { run } = require('../automation/run');
+const credentials = require('./credentials');
 
 let active = false;
 let cancelFlag = false;
@@ -27,6 +28,23 @@ async function startRun(params, sender) {
   if (active) {
     throw new Error('A run is already in progress.');
   }
+
+  // Merge the plaintext credentials in the MAIN process only (MED-2): the
+  // renderer never sends or receives cred values. Prefer the in-memory session
+  // set, else the persisted encrypted set; if neither exists, preserve the
+  // "No saved login details" error path.
+  const creds = credentials.getEffectiveCreds();
+  if (!creds) {
+    throw new Error('No saved login details found. Please sign in again.');
+  }
+  const runParams = {
+    ...params,
+    taiUser: creds.taiUser,
+    taiPass: creds.taiPass,
+    ctsiUser: creds.ctsiUser,
+    ctsiPass: creds.ctsiPass,
+  };
+
   active = true;
   cancelFlag = false;
   pendingConfirmResolve = null;
@@ -60,7 +78,7 @@ async function startRun(params, sender) {
 
   // Run in the background; do not await here so `run:start` resolves once
   // accepted (per IPC contract).
-  run(params, emit, awaitConfirm, isCancelled, { downloadDir, splitDir })
+  run(runParams, emit, awaitConfirm, isCancelled, { downloadDir, splitDir })
     .catch(() => {
       // run() already emitted { type: 'error' } before rethrowing; swallow
       // here so we don't produce an unhandled rejection.

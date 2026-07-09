@@ -92,9 +92,13 @@ that Windows refuses to create without elevated privileges, so the build fails w
 The validated end-to-end automation lives in `playwright-script.spec.ts` and is the source of
 truth the app's automation module was ported from. It needs a `.env` (see `.env.example`) with
 real credentials.
+
+> **WARNING — this is a LIVE production run.** It logs into TAI/CTSI with real credentials and
+> performs REAL invoice uploads to CTSI. It is intentionally NOT wired to `npm test` (which now
+> just prints this warning and exits). Only run it when you truly intend to hit production:
 ```bash
-npm test                    # playwright test
-HEADLESS=1 npm test         # headless
+npm run test:e2e-live               # LIVE playwright test (real CTSI uploads)
+HEADLESS=1 npm run test:e2e-live    # headless
 ```
 
 ### Project layout
@@ -106,7 +110,7 @@ src/
   renderer/     login + main screens (no-build HTML/CSS/vanilla JS)
   shared/       payers.js — payer/account options + payer->customerId map
 split-invoices.js           PDF splitter (reused as-is by the automation)
-playwright-script.spec.ts   reference automation (still runs via `npm test`)
+playwright-script.spec.ts   reference automation (LIVE; runs via `npm run test:e2e-live`)
 electron-builder.yml        NSIS installer config
 .npmrc                      PLAYWRIGHT_BROWSERS_PATH=0 (project-local Chromium)
 ```
