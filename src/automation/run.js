@@ -27,6 +27,13 @@ const { splitInvoices } = require('../../split-invoices.js');
 
 const MAX_PER_BATCH = 20; // CTSI accepts at most 20 files per submit
 
+// How many TAI invoices to tick + download at once. TAI's "select all" download
+// builds one combined PDF that grows too large to download once a date range has
+// enough invoices, so we pull the list in bite-size merged PDFs instead. 20 also
+// happens to be CTSI's per-batch max, so a chunk tends to map to one upload batch
+// — but the two are independent: splitFiles is re-chunked by MAX_PER_BATCH below.
+const DOWNLOAD_CHUNK = 20;
+
 // Pace every Playwright action by this many ms. The TAI/CTSI sites are
 // client-rendered SPAs (Angular/PrimeNG + Kendo) whose controls settle a beat
 // AFTER networkidle; firing actions at full speed raced past the two-step login
@@ -262,6 +269,63 @@ async function ctsiReachUploadScreen(page, ctsiAccount) {
   return frame;
 }
 
+/**
+ * Upload ONE batch (≤20 files) to CTSI and return its Batch ID.
+ *
+ * The CTSI upload screen is flaky (Kendo dropdowns + an iframe), and a single
+ * timed-out click otherwise kills the whole run — this was seen on the last
+ * batch of a run. So we retry, but SAFELY: we only retry the steps up to and
+ * INCLUDING the "Submit" click, re-navigating to a fresh upload screen each
+ * attempt. The moment the Submit click resolves we set `submitted` and never
+ * retry again — retrying after a real submission could double-upload invoices
+ * to production. A click that *times out* never actually submitted, so retrying
+ * that batch is safe. If the Batch-ID confirmation is what times out (after a
+ * successful submit), we surface that without re-uploading.
+ */
+async function ctsiUploadBatch(page, ctsiAccount, batch, emit, label, ctsiUser, ctsiPass) {
+  const MAX_ATTEMPTS = 3;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let submitted = false;
+    try {
+      const frame = await ctsiReachUploadScreen(page, ctsiAccount);
+      await frame.locator('input[type="file"]').setInputFiles(batch);
+      await frame
+        .getByRole('button', { name: /Submit Files? for Processing/i })
+        .click({ timeout: 45000 });
+      submitted = true; // committed — past here we do NOT retry
+
+      // Don't wait for networkidle — CTSI stays busy while processing. Wait for
+      // the success confirmation: a "Batch ID" is assigned.
+      const batchIdText = frame.getByText(/Batch ID/i);
+      await batchIdText.waitFor({ state: 'visible', timeout: 120000 });
+      return (await batchIdText.innerText().catch(() => '')).trim();
+    } catch (e) {
+      lastErr = e;
+      if (submitted) {
+        // The files were already submitted; retrying would double-upload.
+        throw new Error(
+          `Batch ${label} was submitted but its Batch ID didn't appear: ${String(e.message).split('\n')[0]}. ` +
+            `Check CTSI before re-running so you don't upload it twice.`
+        );
+      }
+      emit({
+        type: 'log',
+        level: 'warn',
+        message: `Batch ${label} upload attempt ${attempt}/${MAX_ATTEMPTS} failed before submit: ${String(e.message).split('\n')[0]}`,
+      });
+      // The pre-submit steps failing often means the CTSI session went stale
+      // (dashboard/upload controls missing → click times out), which is most
+      // likely on the last batch of a long run. Re-login before retrying;
+      // re-login never risks a double-upload. Safe no-op if the session is fine.
+      if (attempt < MAX_ATTEMPTS) {
+        await ctsiLogin(page, ctsiUser, ctsiPass, emit).catch(() => {});
+      }
+    }
+  }
+  throw lastErr || new Error(`Batch ${label} upload failed after ${MAX_ATTEMPTS} attempts.`);
+}
+
 async function run(params, emit, awaitConfirm, isCancelled, dirs) {
   const { downloadDir, splitDir } = dirs;
   let browser = null;
@@ -338,125 +402,211 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
     await applyInvoiceDateRange(page, params.startDate, params.endDate);
     if (bailIfCancelled()) return { batchIds: [] };
 
-    // ── STEP 4: select all invoices and download the merged PDF ──────────
+    // ── STEPS 4-8: parallel pipeline (download+split on the TAI page, upload
+    //    on a second CTSI page, running concurrently) ───────────────────────
+    // We do NOT "select all" and download one merged PDF: when a date range has
+    // enough invoices, TAI's single combined download is too large and the
+    // download breaks. Instead we tick the per-row checkboxes DOWNLOAD_CHUNK at
+    // a time and download each subset as a smaller merged PDF. The invoice grid
+    // is one long scrolling list — every row is in the DOM at once as
+    // `input[name="invoiceCheckbox"]` (they share an invalid duplicate id, so we
+    // address them by index, not id). Ticking any subset makes the bulk
+    // "Download (N)" button show that subset's count.
+    //
+    // A producer (this TAI page) downloads + splits one chunk at a time and
+    // queues it; a consumer (a second CTSI page) uploads queued chunks and
+    // deletes their local files as it goes. The two run concurrently, so chunk
+    // N+1 downloads while chunk N uploads. There is NO confirm gate — a Run goes
+    // straight through to CTSI (per the app's configured behavior).
     stage = 'download';
-    emit({ type: 'stage', stage, status: 'start' });
-    // The "Download (N)" button in "Bulk Operations" only renders reliably after
-    // the selection is toggled, so ALWAYS un-check and re-check "select all".
-    // (Retry the toggle a couple times in case it still doesn't appear.)
-    const selectAll = page.locator('#selectAll');
-    const downloadBtn = page.getByRole('button', { name: /^Download/ });
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await selectAll.check();
-      await page.waitForTimeout(400);
-      await selectAll.uncheck();
-      await page.waitForTimeout(400);
-      await selectAll.check();
-      await page.waitForTimeout(700);
-      if (await downloadBtn.isVisible().catch(() => false)) break;
-      emit({ type: 'log', level: 'info', message: `  Download button still hidden after toggle (attempt ${attempt}).` });
-    }
-    await downloadBtn.waitFor({ state: 'visible', timeout: 15000 });
+    emit({ type: 'stage', stage: 'download', status: 'start' });
+    emit({ type: 'stage', stage: 'split', status: 'start' });
 
-    const mergedPath = path.join(downloadDir, 'merged-invoices.pdf');
+    // Wait for the invoice grid to actually render rows before counting.
+    // Counting immediately after Search can race the grid render and momentarily
+    // see 0 rows — which previously aborted the whole run whenever a range had
+    // few invoices ("<20 invoices breaks"). Poll for up to ~15s.
+    const invoiceBoxes = page.locator('input[name="invoiceCheckbox"]');
+    let invoiceCount = 0;
+    for (let i = 0; i < 30; i++) {
+      invoiceCount = await invoiceBoxes.count();
+      if (invoiceCount > 0) break;
+      await page.waitForTimeout(500);
+    }
+    if (invoiceCount === 0) {
+      throw new Error('No invoices found for this payer and date range.');
+    }
+    const downloadChunks = chunk(
+      Array.from({ length: invoiceCount }, (_, i) => i),
+      DOWNLOAD_CHUNK
+    );
+    emit({ type: 'log', level: 'info', message: `Found ${invoiceCount} invoice(s); processing in ${downloadChunks.length} chunk(s) of up to ${DOWNLOAD_CHUNK}.` });
+
     const ctx = page.context();
-    // The merge can be slow, and TAI may either fire a real download or open the
-    // PDF inline in a new tab. Listen for both at the context level (long timeout).
-    const downloadPromise = ctx.waitForEvent('download', { timeout: 120000 }).catch(() => null);
-    const popupPromise = ctx.waitForEvent('page', { timeout: 120000 }).catch(() => null);
-    await downloadBtn.click(); // "Download (N)"
-    const result = await Promise.race([
-      downloadPromise,
-      popupPromise.then((p) => (p ? { __popup: p } : null)),
-    ]);
 
-    if (result && !result.__popup) {
-      await result.saveAs(mergedPath);
-    } else {
-      // Inline PDF opened in a new tab — fetch its bytes using the session cookies.
-      const popup = result?.__popup || (await popupPromise);
-      if (!popup) throw new Error('No download event and no popup tab after Download click.');
-      await popup.waitForLoadState('domcontentloaded').catch(() => {});
-      const resp = await ctx.request.get(popup.url());
-      fs.writeFileSync(mergedPath, await resp.body());
-      await popup.close().catch(() => {});
-    }
-    if (!fs.existsSync(mergedPath)) {
-      throw new Error(`Merged PDF was not downloaded (no file at ${mergedPath}).`);
-    }
-    emit({ type: 'log', level: 'info', message: `Downloaded merged PDF -> ${mergedPath}` });
-    emit({ type: 'stage', stage, status: 'done' });
-    if (bailIfCancelled()) return { batchIds: [] };
+    // Start CTSI login on its OWN page now, concurrently with the first TAI
+    // download, so the uploader is ready by the time the first chunk is split.
+    emit({ type: 'stage', stage: 'ctsi-login', status: 'start' });
+    const ctsiPage = await ctx.newPage();
+    ctsiPage.setDefaultTimeout(30000);
+    ctsiPage.setDefaultNavigationTimeout(60000);
+    let ctsiLoginError = null;
+    let aborted = false; // set if CTSI login fails, so the producer stops early
+    const ctsiReady = ctsiLogin(ctsiPage, params.ctsiUser, params.ctsiPass, emit)
+      .then(() => { emit({ type: 'stage', stage: 'ctsi-login', status: 'done' }); return true; })
+      .catch((e) => { ctsiLoginError = e; aborted = true; emit({ type: 'stage', stage: 'ctsi-login', status: 'error' }); return false; });
 
-    // ── STEP 5: split the merged PDF by Boost cover page ──────────────────
-    stage = 'split';
-    emit({ type: 'stage', stage, status: 'start' });
-    const splitFiles = await splitInvoices(mergedPath, splitDir);
-    if (!(splitFiles.length > 0)) {
-      throw new Error('No invoices were split out of the merged PDF (no Boost cover pages found).');
-    }
-    emit({ type: 'log', level: 'info', message: `Split into ${splitFiles.length} invoice PDF(s).` });
-    emit({ type: 'split', files: splitFiles });
-    emit({ type: 'stage', stage, status: 'done' });
-    if (bailIfCancelled()) return { batchIds: [] };
+    // Producer→consumer handoff. The producer pushes { chunkNumber, files,
+    // mergedPath, chunkSplitDir }; the consumer shifts and uploads them.
+    const queue = [];
+    let producerDone = false;
+    let wake = null; // resolve fn used to wake a waiting consumer
+    const bump = () => { if (wake) { const w = wake; wake = null; w(); } };
+    const allSplit = []; // cumulative split paths, for the UI's split list
+    const batchIds = [];
+    const estTotalBatches = downloadChunks.length; // 1 chunk ≈ 1 batch (display only)
 
-    // ── CONFIRM GATE (NEW, §4.5) ──────────────────────────────────────────
-    const batchCount = Math.ceil(splitFiles.length / MAX_PER_BATCH);
-    emit({ type: 'confirm-request', splitDir, files: splitFiles, batches: batchCount });
-    const proceed = await awaitConfirm();
-    if (!proceed) {
-      emit({ type: 'cancelled' });
-      return { batchIds: [] };
+    // ── Producer: for each chunk, select → download → split → queue ──────
+    const produce = async () => {
+      try {
+        for (let c = 0; c < downloadChunks.length; c++) {
+          if (isCancelled() || aborted) break; // aborted = CTSI login failed
+          const idxs = downloadChunks[c];
+
+          // Fast selection: tick this chunk's checkboxes in ONE page call
+          // (instant) instead of paced per-box Playwright clicks. A real
+          // element.click() fires Angular's change detection, so the bulk
+          // "Download (N)" button updates just as if a human ticked them.
+          await page.evaluate((indices) => {
+            const boxes = document.querySelectorAll('input[name="invoiceCheckbox"]');
+            for (const i of indices) {
+              const b = boxes[i];
+              if (b && !b.checked) b.click();
+            }
+          }, idxs);
+
+          // "Download (N)" reflects the ticked count; wait for OUR exact count
+          // so we never click while the button shows a stale/partial total.
+          const downloadBtn = page.getByRole('button', {
+            name: new RegExp(`^Download \\(${idxs.length}\\)`),
+          });
+          await downloadBtn.waitFor({ state: 'visible', timeout: 15000 });
+
+          const mergedPath = path.join(downloadDir, `merged-chunk-${String(c + 1).padStart(2, '0')}.pdf`);
+          // TAI may fire a real download OR open the PDF inline in a popup.
+          // Scope BOTH listeners to the TAI page so the concurrent CTSI upload
+          // flow on the other page can never be mistaken for our download.
+          const downloadPromise = page.waitForEvent('download', { timeout: 120000 }).catch(() => null);
+          const popupPromise = page.waitForEvent('popup', { timeout: 120000 }).catch(() => null);
+          await downloadBtn.click();
+          const result = await Promise.race([
+            downloadPromise,
+            popupPromise.then((p) => (p ? { __popup: p } : null)),
+          ]);
+          if (result && !result.__popup) {
+            await result.saveAs(mergedPath);
+          } else {
+            const popup = result?.__popup || (await popupPromise);
+            if (!popup) throw new Error(`No download event and no popup tab after Download click (chunk ${c + 1}).`);
+            await popup.waitForLoadState('domcontentloaded').catch(() => {});
+            const resp = await ctx.request.get(popup.url());
+            fs.writeFileSync(mergedPath, await resp.body());
+            await popup.close().catch(() => {});
+          }
+          if (!fs.existsSync(mergedPath)) {
+            throw new Error(`Merged PDF chunk ${c + 1} was not downloaded (no file at ${mergedPath}).`);
+          }
+          emit({ type: 'log', level: 'info', message: `Downloaded chunk ${c + 1}/${downloadChunks.length} (${idxs.length} invoice(s)).` });
+
+          // Deselect everything at once via the grid's "Clear All" control, so
+          // the next chunk's count starts clean.
+          await page.evaluate(() => {
+            const el = document.querySelector('#clearAll');
+            if (el) el.click();
+          });
+
+          // Split this chunk into its own subdir: splitInvoices dedupes
+          // filenames only WITHIN a single call and its sequential fallback name
+          // restarts at 001 each call, so a shared flat dir could overwrite.
+          const chunkSplitDir = path.join(splitDir, `chunk-${String(c + 1).padStart(2, '0')}`);
+          const files = await splitInvoices(mergedPath, chunkSplitDir);
+          if (files.length > 0) {
+            allSplit.push(...files);
+            emit({ type: 'split', files: allSplit.slice() });
+            queue.push({ chunkNumber: c + 1, files, mergedPath, chunkSplitDir });
+            bump();
+          } else {
+            emit({ type: 'log', level: 'warn', message: `Chunk ${c + 1} produced 0 invoices (no Boost cover page); skipping.` });
+            fs.rmSync(mergedPath, { force: true });
+          }
+        }
+        if (!isCancelled() && !aborted) {
+          emit({ type: 'stage', stage: 'download', status: 'done' });
+          emit({ type: 'stage', stage: 'split', status: 'done' });
+        }
+      } finally {
+        producerDone = true;
+        bump();
+      }
+    };
+
+    // ── Consumer: upload each queued chunk to CTSI, then delete its locals ──
+    const consume = async () => {
+      const loggedIn = await ctsiReady;
+      if (!loggedIn) throw ctsiLoginError || new Error('CTSI login failed.');
+      stage = 'upload';
+      emit({ type: 'stage', stage: 'upload', status: 'start' });
+      let batchNo = 0;
+      while (true) {
+        if (isCancelled()) break;
+        if (queue.length === 0) {
+          if (producerDone) break;
+          await new Promise((r) => { wake = r; }); // sleep until producer bumps
+          continue;
+        }
+        const item = queue.shift();
+        // A 20-invoice chunk yields ≤20 split files = one CTSI batch, but guard
+        // anyway: re-chunk this item's files by CTSI's per-submit max of 20.
+        const subBatches = chunk(item.files, MAX_PER_BATCH);
+        for (const batch of subBatches) {
+          if (isCancelled()) break;
+          batchNo += 1;
+          emit({ type: 'batch', index: batchNo, total: estTotalBatches, count: batch.length, status: 'start' });
+          // Upload with a safe retry (reach fresh screen + set files + submit,
+          // retried only up to the submit click — see ctsiUploadBatch).
+          const confirmation = await ctsiUploadBatch(ctsiPage, params.ctsiAccount, batch, emit, batchNo, params.ctsiUser, params.ctsiPass);
+          batchIds.push(confirmation || `Batch ${batchNo}`);
+          emit({ type: 'batch', index: batchNo, total: estTotalBatches, count: batch.length, status: 'done', batchId: confirmation || undefined });
+        }
+        // If we were cancelled partway through this chunk's batches, don't
+        // delete it — it wasn't fully uploaded.
+        if (isCancelled()) break;
+        // Uploaded → delete this chunk's local files (merged PDF + split subdir).
+        fs.rmSync(item.chunkSplitDir, { recursive: true, force: true });
+        fs.rmSync(item.mergedPath, { force: true });
+        emit({ type: 'log', level: 'info', message: `Uploaded chunk ${item.chunkNumber} and deleted its local files.` });
+      }
+      if (!isCancelled()) emit({ type: 'stage', stage: 'upload', status: 'done' });
+    };
+
+    // Run both concurrently. Always let the producer settle so a producer error
+    // surfaces even if the consumer finished first.
+    const producerPromise = produce();
+    try {
+      await consume();
+    } finally {
+      await producerPromise.catch(() => {});
     }
+    await producerPromise; // re-await: propagates a producer error if any
+
     if (isCancelled()) {
       emit({ type: 'cancelled' });
-      return { batchIds: [] };
+      return { batchIds };
+    }
+    if (allSplit.length === 0) {
+      throw new Error('No invoices were split out of the downloaded PDFs (no Boost cover pages found).');
     }
 
-    // ── STEP 6: CTSI login (auth0 Lock, with retry) ────────────────────────
-    stage = 'ctsi-login';
-    emit({ type: 'stage', stage, status: 'start' });
-    await ctsiLogin(page, params.ctsiUser, params.ctsiPass, emit);
-    emit({ type: 'stage', stage, status: 'done' });
-
-    // ── STEP 7 & 8: upload the split PDFs in batches of ≤20, submit each ──
-    stage = 'upload';
-    emit({ type: 'stage', stage, status: 'start' });
-    // CTSI allows at most 20 files per submission ("Drop files here… (Max 20)").
-    // We re-open a fresh upload screen (carrier + account + Go To Upload) for
-    // each batch so multi-batch runs always start clean.
-    const batches = chunk(splitFiles, MAX_PER_BATCH);
-    emit({ type: 'log', level: 'info', message: `Uploading ${splitFiles.length} file(s) in ${batches.length} batch(es) of up to ${MAX_PER_BATCH}.` });
-
-    const batchIds = [];
-    for (let b = 0; b < batches.length; b++) {
-      if (isCancelled()) {
-        emit({ type: 'cancelled' });
-        return { batchIds };
-      }
-      const batch = batches[b];
-      emit({ type: 'batch', index: b + 1, total: batches.length, count: batch.length, status: 'start' });
-
-      const frame = await ctsiReachUploadScreen(page, params.ctsiAccount);
-
-      // Set this batch on the multi-file input (name="files", accepts up to 20).
-      await frame.locator('input[type="file"]').setInputFiles(batch);
-
-      // Submit for processing (button reads "Submit Files for Processing").
-      await frame
-        .getByRole('button', { name: /Submit Files? for Processing/i })
-        .click();
-
-      // Don't wait for networkidle — CTSI keeps the network busy while processing.
-      // Instead wait for the success confirmation: a "Batch ID" is assigned.
-      const batchIdText = frame.getByText(/Batch ID/i);
-      await batchIdText.waitFor({ state: 'visible', timeout: 90000 });
-      const confirmation = (await batchIdText.innerText().catch(() => '')).trim();
-      batchIds.push(confirmation || `Batch ${b + 1}`);
-      emit({ type: 'batch', index: b + 1, total: batches.length, count: batch.length, status: 'done', batchId: confirmation || undefined });
-    }
-
-    emit({ type: 'stage', stage, status: 'done' });
     emit({ type: 'log', level: 'info', message: 'All batches submitted.' });
     emit({ type: 'done', batchIds });
     return { batchIds };
