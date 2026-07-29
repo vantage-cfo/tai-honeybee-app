@@ -90,8 +90,12 @@ const MONTH_NAMES = [
  *
  * Navigates to the target month via the Prev/Next Month arrows (reading the
  * header's month + year labels), then clicks the exact in-month day cell by its
- * `data-date` attribute. `data-date` is "YYYY-M-D" — month & day are NOT
- * zero-padded and month is 1-based (e.g. "2026-7-1"). Works for any date.
+ * `data-date` attribute.
+ *
+ * TAI upgraded PrimeNG (seen live 2026-07-29): header labels are now buttons
+ * `.p-datepicker-select-month` / `.p-datepicker-select-year`, and `data-date`
+ * months are 0-BASED ("2026-6-1" = July 1; the old panel was 1-based).
+ * Selectors accept both generations. See src/automation/run.js for detail.
  *
  * @param scope The page (or frame) whose calendar popup is open.
  * @param iso   Date as "YYYY-MM-DD".
@@ -99,10 +103,13 @@ const MONTH_NAMES = [
 async function pickDayInOpenCalendar(scope: import('@playwright/test').Page, iso: string) {
   const [y, m, d] = iso.split('-').map(Number); // m is 1-based
 
+  const monthHeader = scope.locator('.p-datepicker-select-month, .p-datepicker-month').first();
+  const yearHeader = scope.locator('.p-datepicker-select-year, .p-datepicker-year').first();
+
   // Walk the calendar to the target month/year.
   for (let guard = 0; guard < 400; guard++) {
-    const monthName = (await scope.locator('.p-datepicker-month').first().innerText()).trim();
-    const year = parseInt((await scope.locator('.p-datepicker-year').first().innerText()).trim(), 10);
+    const monthName = (await monthHeader.innerText()).trim();
+    const year = parseInt((await yearHeader.innerText()).trim(), 10);
     const curMonth = MONTH_NAMES.indexOf(monthName) + 1;
     if (curMonth === m && year === y) break;
     const goPrev = year > y || (year === y && curMonth > m);
@@ -113,9 +120,14 @@ async function pickDayInOpenCalendar(scope: import('@playwright/test').Page, iso
   }
 
   // Click the day that belongs to the current month (not a leading/trailing
-  // day borrowed from an adjacent month).
+  // day borrowed from an adjacent month). 0-based data-date first (current
+  // TAI), 1-based second (pre-upgrade fallback).
   await scope
-    .locator(`td:not(.p-datepicker-other-month) span[data-date="${y}-${m}-${d}"]`)
+    .locator(
+      `td:not(.p-datepicker-other-month) span[data-date="${y}-${m - 1}-${d}"], ` +
+        `td:not(.p-datepicker-other-month) span[data-date="${y}-${m}-${d}"]`
+    )
+    .first()
     .click();
 }
 
@@ -129,7 +141,25 @@ async function applyInvoiceDateRange(
   endIso: string
 ) {
   await scope.getByRole('button', { name: 'Show Advanced' }).click();
-  await scope.getByRole('combobox', { name: 'Start - End' }).click();
+  // New PrimeNG: clicking the input only focuses it; the calendar opens via
+  // the sibling `button.p-datepicker-dropdown`. Try the input first (old
+  // behavior), fall back to the dropdown button.
+  const input = scope.getByRole('combobox', { name: 'Start - End' });
+  await input.click();
+  const monthHeader = scope.locator('.p-datepicker-select-month, .p-datepicker-month').first();
+  const opened = await monthHeader
+    .waitFor({ state: 'visible', timeout: 3000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!opened) {
+    await scope
+      .locator('p-datepicker, p-calendar')
+      .filter({ has: input })
+      .locator('button.p-datepicker-dropdown')
+      .first()
+      .click();
+    await monthHeader.waitFor({ state: 'visible', timeout: 10000 });
+  }
   await pickDayInOpenCalendar(scope, startIso); // range start
   await pickDayInOpenCalendar(scope, endIso); // range end
   await scope.getByRole('button', { name: 'Search' }).click();
