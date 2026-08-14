@@ -39,7 +39,11 @@ jobs:
         run: npm ci
 
       - name: Build NSIS installer (unsigned)
-        run: npx electron-builder --win --x64
+        # --publish never: on CI electron-builder defaults to self-publishing
+        # ("CI detected" / "tag is defined") and hard-fails wanting GH_TOKEN
+        # before the artifact/release steps ever run. Releasing is owned by
+        # the action-gh-release step below, not by electron-builder.
+        run: npx electron-builder --win --x64 --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
