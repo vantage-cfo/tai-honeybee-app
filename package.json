@@ -1,6 +1,6 @@
 {
   "name": "boost-tai-ctsi-automation",
-  "version": "1.2.3",
+  "version": "1.3.0",
   "private": true,
   "description": "Download merged Boost invoices from TAI, split by cover page, upload to CTSI",
   "author": "Vantage CFO",
@@ -9,6 +9,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win",
+    "dist:win-from-mac": "node scripts/dist-win-from-mac.js",
     "postinstall": "playwright install chromium",
     "test": "echo \"'npm test' is disabled: the Playwright suite runs a LIVE end-to-end workflow that logs into TAI/CTSI with real credentials and performs REAL production invoice uploads to CTSI. Run 'npm run test:e2e-live' only if you truly intend to hit production.\"",
     "test:e2e-live": "playwright test"
