@@ -32,6 +32,7 @@ if (app.isPackaged) {
 }
 const credentials = require('./credentials');
 const runner = require('./runner');
+const updates = require('./updates');
 const { PAYERS, ACCOUNTS } = require('../shared/payers');
 
 let mainWindow = null;
@@ -62,6 +63,9 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+
+  // net.fetch needs the app to be ready, so the update check starts here.
+  updates.start(() => mainWindow);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -119,6 +123,13 @@ ipcMain.handle('shell:openFolder', async (_event, absPath) => {
   }
   await shell.openPath(target);
 });
+
+// ── IPC: updates ─────────────────────────────────────────────────────────
+// updates:openDownload opens a FIXED GitHub releases URL in the system
+// browser (constant in updates.js) — the renderer can't pass a URL, so this
+// can never be steered to shell.openExternal an arbitrary target.
+ipcMain.handle('updates:get', () => updates.getStatus());
+ipcMain.handle('updates:openDownload', () => updates.openDownloadPage());
 
 // ── IPC: navigation ──────────────────────────────────────────────────────
 ipcMain.on('nav:go', (_event, screen) => {

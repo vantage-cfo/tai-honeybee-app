@@ -1,6 +1,6 @@
 {
   "name": "boost-tai-ctsi-automation",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Download merged Boost invoices from TAI, split by cover page, upload to CTSI",
   "author": "Vantage CFO",
