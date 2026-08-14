@@ -70,6 +70,39 @@ body {
   color: var(--ink-faint);
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-update {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: rgba(37, 68, 214, 0.35);
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.btn-update::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.btn-update:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-update:hover::before {
+  background: #fff;
+}
+
 /* ── Layout ──────────────────────────────────────────────────────────── */
 .centered-page {
   min-height: 100%;

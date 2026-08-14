@@ -56,6 +56,19 @@
     window.boost.navigate('login');
   });
 
+  // ── Update button ─────────────────────────────────────────────────────
+  // Populated only when main's GitHub Releases check found a newer version:
+  // pulled from main's cache on load, plus a push if one appears while open.
+  const updateBtn = document.getElementById('update-btn');
+  function showUpdateButton(info) {
+    if (!info || !info.version) return;
+    updateBtn.textContent = `Update available — v${info.version}`;
+    updateBtn.classList.remove('hidden');
+  }
+  updateBtn.addEventListener('click', () => window.boost.openDownloadPage());
+  window.boost.onUpdateAvailable(showUpdateButton);
+  window.boost.getUpdateStatus().then(showUpdateButton);
+
   // ── Result banner ────────────────────────────────────────────────────
   function showBanner(kind, message) {
     resultBanner.className = `banner visible banner-${kind}`;

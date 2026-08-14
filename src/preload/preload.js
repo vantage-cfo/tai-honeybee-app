@@ -32,6 +32,16 @@ contextBridge.exposeInMainWorld('boost', {
     return () => ipcRenderer.removeListener('run:progress', listener);
   },
 
+  // Updates — main checks GitHub Releases; the renderer only learns
+  // { version } and can ask main to open the fixed releases page.
+  getUpdateStatus: () => ipcRenderer.invoke('updates:get'),
+  openDownloadPage: () => ipcRenderer.invoke('updates:openDownload'),
+  onUpdateAvailable: (cb) => {
+    const listener = (_event, info) => cb(info);
+    ipcRenderer.on('updates:available', listener);
+    return () => ipcRenderer.removeListener('updates:available', listener);
+  },
+
   // Utilities
   openFolder: (absPath) => ipcRenderer.invoke('shell:openFolder', absPath),
   navigate: (screen) => ipcRenderer.send('nav:go', screen),

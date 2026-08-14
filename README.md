@@ -21,6 +21,12 @@ need **no Node.js or Playwright installed**.
    **"Windows protected your PC"** — click **More info → Run anyway**. This is expected.
 3. Launch **TAI-Honeybee App** from the Start menu / desktop shortcut.
 
+### Updating
+When a newer release is published, the app shows an **"Update available — v…"** button in
+its header (it checks the Releases page on launch and every few hours). Clicking it opens
+the Releases page in your browser — download and run the new installer; it replaces the
+old version in place. If the button never appears, you're up to date (or offline).
+
 ### Use
 1. **Sign in** — enter your **TAI** and **CTSI / Honeybee** usernames and passwords. Leave
    **"Save login details on this computer"** checked to skip this screen next time (credentials

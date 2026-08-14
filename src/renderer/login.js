@@ -24,6 +24,17 @@
 
   errorBannerDismiss.addEventListener('click', hideError);
 
+  // Update button — same behavior as the main screen (see app.js).
+  const updateBtn = document.getElementById('update-btn');
+  function showUpdateButton(info) {
+    if (!info || !info.version) return;
+    updateBtn.textContent = `Update available — v${info.version}`;
+    updateBtn.classList.remove('hidden');
+  }
+  updateBtn.addEventListener('click', () => window.boost.openDownloadPage());
+  window.boost.onUpdateAvailable(showUpdateButton);
+  window.boost.getUpdateStatus().then(showUpdateButton);
+
   // Password show/hide toggles.
   document.querySelectorAll('.toggle-visibility').forEach((btn) => {
     btn.addEventListener('click', () => {
