@@ -53,7 +53,8 @@ const CTSI_ACCOUNT = requireEnv('CTSI_ACCOUNT'); // app-selected account (e.g. "
 const CTSI_CARRIER = process.env.CTSI_CARRIER || 'BOVT - BOOST TRANSPORT';
 
 const MAX_PER_BATCH = 20; // CTSI accepts at most 20 files per submit
-const DOWNLOAD_CHUNK = 20; // TAI invoices ticked + downloaded per merged PDF
+const DOWNLOAD_CHUNK = 10; // TAI invoices ticked + downloaded per merged PDF (~4s/invoice server-side merge)
+const DOWNLOAD_WAIT_MS = 300000; // TAI merges the WHOLE PDF server-side before the blob download event fires
 
 const DOWNLOAD_DIR = path.resolve('downloads');
 const SPLIT_DIR = path.resolve('split-output');
@@ -354,23 +355,39 @@ test('Boost: TAI download → split → CTSI batched upload', async ({ page }) =
     const mergedPath = path.join(DOWNLOAD_DIR, `merged-chunk-${String(c + 1).padStart(2, '0')}.pdf`);
     // TAI may fire a real download OR open the PDF inline in a popup. Scope both
     // listeners to this page (in the app a second CTSI page runs concurrently).
-    const downloadPromise = page.waitForEvent('download', { timeout: 120000 }).catch(() => null);
-    const popupPromise = page.waitForEvent('popup', { timeout: 120000 }).catch(() => null);
-    await downloadBtn.click(); // "Download (N)"
-    const result = await Promise.race([
-      downloadPromise,
-      popupPromise.then((p) => (p ? { __popup: p } : null)),
-    ]);
-    if (result && !(result as any).__popup) {
-      await (result as import('@playwright/test').Download).saveAs(mergedPath);
-    } else {
-      const popup = (result as any)?.__popup || (await popupPromise);
-      if (!popup) throw new Error(`No download event and no popup after Download click (chunk ${c + 1}).`);
-      await popup.waitForLoadState('domcontentloaded').catch(() => {});
-      const resp = await ctx.request.get(popup.url());
-      fs.writeFileSync(mergedPath, await resp.body());
-      await popup.close().catch(() => {});
+    // TAI's rebuilt page fetches the merged PDF via XHR and delivers it as a blob
+    // download, so the event fires only after the FULL server-side merge; wait
+    // long and retry the click once (re-requesting a merge is idempotent).
+    let captured = false;
+    for (let attempt = 1; attempt <= 2 && !captured; attempt++) {
+      const downloadPromise = page.waitForEvent('download', { timeout: DOWNLOAD_WAIT_MS }).catch(() => null);
+      const popupPromise = page.waitForEvent('popup', { timeout: DOWNLOAD_WAIT_MS }).catch(() => null);
+      if (attempt === 1) {
+        await downloadBtn.click(); // "Download (N)"
+      } else {
+        await downloadBtn.click().catch(() => {});
+      }
+      const result = await Promise.race([
+        downloadPromise,
+        popupPromise.then((p) => (p ? { __popup: p } : null)),
+      ]);
+      if (result && !(result as any).__popup) {
+        await (result as import('@playwright/test').Download).saveAs(mergedPath);
+        captured = true;
+      } else {
+        const popup = (result as any)?.__popup || (await popupPromise);
+        if (popup) {
+          await popup.waitForLoadState('domcontentloaded').catch(() => {});
+          const resp = await ctx.request.get(popup.url());
+          fs.writeFileSync(mergedPath, await resp.body());
+          await popup.close().catch(() => {});
+          captured = true;
+        } else if (attempt === 1) {
+          console.log(`Chunk ${c + 1}: no download after ${DOWNLOAD_WAIT_MS / 1000}s — retrying the Download click once.`);
+        }
+      }
     }
+    if (!captured) throw new Error(`No download event and no popup after Download click (chunk ${c + 1}).`);
     expect(fs.existsSync(mergedPath), `chunk ${c + 1} downloaded`).toBeTruthy();
     mergedPaths.push(mergedPath);
     console.log(`Downloaded chunk ${c + 1}/${indexChunks.length} (${idxs.length} invoice(s)).`);
