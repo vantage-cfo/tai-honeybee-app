@@ -1,0 +1,70 @@
+# Builds the unsigned Windows NSIS installer on a hosted Windows runner, so
+# no local Windows machine is ever needed.
+#
+# - Manual run (Actions tab -> "Build Windows installer" -> Run workflow):
+#   builds and uploads the installer as a workflow artifact (kept 30 days).
+# - Tag push (v*): additionally attaches the installer to a GitHub Release,
+#   which is where README points end users (releases/latest).
+#
+# Building on windows-latest means `npm ci` -> `playwright install chromium`
+# naturally downloads the *Windows* Chromium/ffmpeg/winldd into
+# node_modules/playwright-core/.local-browsers (PLAYWRIGHT_BROWSERS_PATH=0
+# via .npmrc), exactly like the manual Windows builds did. The winCodeSign
+# symlink gotcha from README does not apply: hosted runners can create
+# symlinks.
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write # create Releases on tag builds
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (also downloads Windows Chromium)
+        run: npm ci
+
+      - name: Build NSIS installer (unsigned)
+        run: npx electron-builder --win --x64
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Read app version
+        id: meta
+        shell: bash
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TAI-Honeybee-App-Setup-${{ steps.meta.outputs.version }}
+          path: dist/*.exe
+          if-no-files-found: error
+          # v4 artifacts are immutable per run — without this, re-running a
+          # job that already uploaded fails with a 409 name conflict.
+          overwrite: true
+          retention-days: 30
+          # The exe is already NSIS-max-compressed; recompressing wastes minutes.
+          compression-level: 0
+
+      - name: Attach installer to GitHub Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true

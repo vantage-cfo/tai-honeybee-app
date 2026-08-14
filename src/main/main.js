@@ -10,18 +10,25 @@
 // spec §7.2.
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 if (app.isPackaged) {
   // Playwright's Chromium is asarUnpack'd to app.asar.unpacked on real disk.
   // PLAYWRIGHT_BROWSERS_PATH='0' would resolve relative to the playwright-core
   // package dir, which lands INSIDE app.asar (an archive — chrome.exe can't be
   // spawned from there → ENOENT). Point it at the unpacked .local-browsers dir
-  // instead. Revision-agnostic: Playwright picks the right chromium-<rev> and
+  // instead. electron-builder's collector packs playwright-core NESTED under
+  // playwright (verified in a 25.1.8 build) even though npm hoists it to
+  // top-level node_modules in dev — probe both layouts so a future
+  // electron-builder/npm layout change can't silently break the launch.
+  // Revision-agnostic: Playwright picks the right chromium-<rev> and
   // headless-shell under this path.
-  process.env.PLAYWRIGHT_BROWSERS_PATH = path.join(
-    process.resourcesPath,
-    'app.asar.unpacked',
-    'node_modules', 'playwright', 'node_modules', 'playwright-core', '.local-browsers'
-  );
+  const unpackedModules = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules');
+  const browsersDirCandidates = [
+    path.join(unpackedModules, 'playwright', 'node_modules', 'playwright-core', '.local-browsers'),
+    path.join(unpackedModules, 'playwright-core', '.local-browsers'),
+  ];
+  process.env.PLAYWRIGHT_BROWSERS_PATH =
+    browsersDirCandidates.find((p) => fs.existsSync(p)) || browsersDirCandidates[0];
 }
 const credentials = require('./credentials');
 const runner = require('./runner');
