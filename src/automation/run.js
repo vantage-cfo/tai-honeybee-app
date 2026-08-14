@@ -29,10 +29,19 @@ const MAX_PER_BATCH = 20; // CTSI accepts at most 20 files per submit
 
 // How many TAI invoices to tick + download at once. TAI's "select all" download
 // builds one combined PDF that grows too large to download once a date range has
-// enough invoices, so we pull the list in bite-size merged PDFs instead. 20 also
-// happens to be CTSI's per-batch max, so a chunk tends to map to one upload batch
-// — but the two are independent: splitFiles is re-chunked by MAX_PER_BATCH below.
-const DOWNLOAD_CHUNK = 20;
+// enough invoices, so we pull the list in bite-size merged PDFs instead. The two
+// are independent from CTSI batching: splitFiles is re-chunked by MAX_PER_BATCH
+// below. 10 (was 20) keeps the server-side merge well inside DOWNLOAD_WAIT_MS —
+// TAI generates the whole merged PDF before the download starts (~4s/invoice
+// measured live 2026-08-14), and TAI's own UI warns >30 invoices may time out.
+const DOWNLOAD_CHUNK = 10;
+
+// How long to wait for a chunk's merged PDF after clicking "Download (N)".
+// TAI's rebuilt invoice-search (PrimeNG upgrade) fetches the PDF via XHR and
+// hands it over as a blob download, so the download event fires only after the
+// FULL server-side merge + transfer completes — not at response start like the
+// old server-initiated download. The wait must cover the whole generation.
+const DOWNLOAD_WAIT_MS = 300000;
 
 // Pace every Playwright action by this many ms. The TAI/CTSI sites are
 // client-rendered SPAs (Angular/PrimeNG + Kendo) whose controls settle a beat
@@ -538,22 +547,41 @@ async function run(params, emit, awaitConfirm, isCancelled, dirs) {
           // TAI may fire a real download OR open the PDF inline in a popup.
           // Scope BOTH listeners to the TAI page so the concurrent CTSI upload
           // flow on the other page can never be mistaken for our download.
-          const downloadPromise = page.waitForEvent('download', { timeout: 120000 }).catch(() => null);
-          const popupPromise = page.waitForEvent('popup', { timeout: 120000 }).catch(() => null);
-          await downloadBtn.click();
-          const result = await Promise.race([
-            downloadPromise,
-            popupPromise.then((p) => (p ? { __popup: p } : null)),
-          ]);
-          if (result && !result.__popup) {
-            await result.saveAs(mergedPath);
-          } else {
-            const popup = result?.__popup || (await popupPromise);
-            if (!popup) throw new Error(`No download event and no popup tab after Download click (chunk ${c + 1}).`);
-            await popup.waitForLoadState('domcontentloaded').catch(() => {});
-            const resp = await ctx.request.get(popup.url());
-            fs.writeFileSync(mergedPath, await resp.body());
-            await popup.close().catch(() => {});
+          // Retry the click once on a quiet timeout: re-clicking only re-requests
+          // the same merge (idempotent, unlike the CTSI submit), and a click
+          // blocked by TAI's in-flight loading overlay still leaves the fresh
+          // listeners racing, so a late first response can be captured too.
+          let captured = false;
+          for (let attempt = 1; attempt <= 2 && !captured; attempt++) {
+            const downloadPromise = page.waitForEvent('download', { timeout: DOWNLOAD_WAIT_MS }).catch(() => null);
+            const popupPromise = page.waitForEvent('popup', { timeout: DOWNLOAD_WAIT_MS }).catch(() => null);
+            if (attempt === 1) {
+              await downloadBtn.click();
+            } else {
+              await downloadBtn.click().catch(() => {});
+            }
+            const result = await Promise.race([
+              downloadPromise,
+              popupPromise.then((p) => (p ? { __popup: p } : null)),
+            ]);
+            if (result && !result.__popup) {
+              await result.saveAs(mergedPath);
+              captured = true;
+            } else {
+              const popup = result?.__popup || (await popupPromise);
+              if (popup) {
+                await popup.waitForLoadState('domcontentloaded').catch(() => {});
+                const resp = await ctx.request.get(popup.url());
+                fs.writeFileSync(mergedPath, await resp.body());
+                await popup.close().catch(() => {});
+                captured = true;
+              } else if (attempt === 1) {
+                emit({ type: 'log', level: 'warn', message: `Chunk ${c + 1}: no download after ${DOWNLOAD_WAIT_MS / 1000}s — retrying the Download click once.` });
+              }
+            }
+          }
+          if (!captured) {
+            throw new Error(`No download event and no popup tab after Download click (chunk ${c + 1}).`);
           }
           if (!fs.existsSync(mergedPath)) {
             throw new Error(`Merged PDF chunk ${c + 1} was not downloaded (no file at ${mergedPath}).`);
